@@ -1,146 +1,247 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes, SlashCommandBuilder } = require('discord.js');
+/**
+ * 📖 LITURGIA.BR - DISCORD BOT
+ * Desenvolvido por verton.lab
+ * Arquitetura Premium com Sistema de Cache e Auto-Broadcast
+ */
+
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes, SlashCommandBuilder, ActivityType } = require('discord.js');
 const cron = require('node-cron');
 require('dotenv').config();
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages
-    ]
-});
-
-// --- 1. CONFIGURAÇÃO DE UI/UX E BRANDING ---
-const SITE_URL = 'https://instagram.com/liturgia.br'; // Troque para o seu site oficial quando lançar
-const LOGO_URL = 'https://instagram.ffec3-1.fna.fbcdn.net/v/t51.82787-19/650127290_17880257589493149_8847861152074275433_n.jpg?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xMDgwLmMyIn0&_nc_ht=instagram.ffec3-1.fna.fbcdn.net&_nc_cat=109&_nc_oc=Q6cZ2gEc03KmL6NFRMf9kuy1R4ZZKrbG_CbciWDsYi3wPsTUDH0Rg1eOPvfmmE1di9BYGFQ&_nc_ohc=Voxi9uRlUfkQ7kNvwFQ7kKR&_nc_gid=67YVquBW6FDeqh5opSFWOw&edm=AP4sbd4BAAAA&ccb=7-5&oh=00_AfwOfWZeujUAIHEx3YPhyRqrGaSYVhQWgV0iijc3cnqWPg&oe=69C762E3&_nc_sid=7a9f4b'; // Suba sua logo no Imgur e cole aqui
-
-const obterTemaLiturgico = (liturgiaTexto) => {
-    const texto = liturgiaTexto.toLowerCase();
-    if (texto.includes('verde')) return { cor: '#22c55e', emoji: '🌿' };
-    if (texto.includes('roxo')) return { cor: '#9333ea', emoji: '💜' };
-    if (texto.includes('vermelho')) return { cor: '#dc2626', emoji: '🩸' };
-    if (texto.includes('branco') || texto.includes('solenidade')) return { cor: '#ffffff', emoji: '✨' };
-    if (texto.includes('rosa')) return { cor: '#f472b6', emoji: '🌸' };
-    return { cor: '#2f3136', emoji: '📖' }; // Padrão
+// --- 1. CONFIGURAÇÕES E BRANDING ---
+const CONFIG = {
+    SITE_URL: 'https://instagram.com/liturgia.br',
+    // Mantive a sua logo do Instagram exatamente como você configurou:
+    LOGO_URL: 'https://instagram.ffec3-1.fna.fbcdn.net/v/t51.82787-19/650127290_17880257589493149_8847861152074275433_n.jpg?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xMDgwLmMyIn0&_nc_ht=instagram.ffec3-1.fna.fbcdn.net&_nc_cat=109&_nc_oc=Q6cZ2gEc03KmL6NFRMf9kuy1R4ZZKrbG_CbciWDsYi3wPsTUDH0Rg1eOPvfmmE1di9BYGFQ&_nc_ohc=Voxi9uRlUfkQ7kNvwFQ7kKR&_nc_gid=67YVquBW6FDeqh5opSFWOw&edm=AP4sbd4BAAAA&ccb=7-5&oh=00_AfwOfWZeujUAIHEx3YPhyRqrGaSYVhQWgV0iijc3cnqWPg&oe=69C762E3&_nc_sid=7a9f4b',
+    API_URL: 'https://liturgia.up.railway.app/',
+    HORARIO_BOM_DIA: '0 7 * * *', // 07:00 da manhã
+    TIMEZONE: 'America/Sao_Paulo'
 };
 
-// --- 2. COMANDOS SLASH (Módulo de Comandos) ---
-const commands = [
-    new SlashCommandBuilder()
-        .setName('liturgia')
-        .setDescription('Acesse a liturgia diária com formatação premium.')
-].map(command => command.toJSON());
+// --- 2. SISTEMA DE CACHE DE ALTO DESEMPENHO ---
+// Isso impede que o bot fique lento. Ele consulta a API 1 vez por dia e guarda na memória.
+const CacheSistema = {
+    data: null,
+    payload: null,
+    
+    obterDataDeHoje: () => new Date().toLocaleDateString('pt-BR', { timeZone: CONFIG.TIMEZONE }),
+    
+    verificar: function() {
+        const hoje = this.obterDataDeHoje();
+        if (this.data === hoje && this.payload !== null) {
+            return this.payload;
+        }
+        return null;
+    },
+    
+    salvar: function(novoPayload) {
+        this.data = this.obterDataDeHoje();
+        this.payload = novoPayload;
+        console.log(`[CACHE] 💾 Nova liturgia salva em memória para o dia ${this.data}`);
+    }
+};
 
-// --- 3. MOTOR DE BUSCA E MONTAGEM DO EMBED ---
-async function construirInterfaceLiturgia() {
+// --- 3. FERRAMENTAS DE DESIGN E FORMATAÇÃO ---
+const Design = {
+    obterTema: (liturgiaTexto) => {
+        if (!liturgiaTexto) return { cor: '#2f3136', emoji: '📖' };
+        const texto = liturgiaTexto.toLowerCase();
+        
+        if (texto.includes('verde')) return { cor: '#22c55e', emoji: '🌿' };
+        if (texto.includes('roxo')) return { cor: '#9333ea', emoji: '💜' };
+        if (texto.includes('vermelho')) return { cor: '#dc2626', emoji: '🩸' };
+        if (texto.includes('branco') || texto.includes('solenidade')) return { cor: '#ffffff', emoji: '✨' };
+        if (texto.includes('rosa')) return { cor: '#f472b6', emoji: '🌸' };
+        
+        return { cor: '#2f3136', emoji: '📖' };
+    },
+
+    // Formatador Inteligente: Limita o texto e aplica Blockquotes do Discord (>) de forma segura
+    formatarLeitura: (texto, limite = 900) => {
+        if (!texto || texto.trim() === "") return "> *Texto não disponibilizado pela liturgia de hoje.*";
+        
+        let textoProcessado = texto.length > limite 
+            ? texto.substring(0, limite) + "...\n\n*[Continue a leitura no perfil oficial]*" 
+            : texto;
+            
+        // Garante que cada quebra de linha mantenha a formatação visual elegante
+        return "> " + textoProcessado.replace(/\n/g, '\n> ');
+    }
+};
+
+// --- 4. MOTOR PRINCIPAL (BUSCA E MONTAGEM) ---
+async function obterPayloadLiturgia() {
+    // 4.1. Tenta buscar da memória RAM primeiro (Resposta instantânea em milissegundos)
+    const emMemoria = CacheSistema.verificar();
+    if (emMemoria) {
+        console.log("[SISTEMA] ⚡ Servindo leitura via Cache Super Rápido.");
+        return emMemoria;
+    }
+
+    // 4.2. Se não tem no cache, busca na API com tratamento de erros moderno
     try {
-        const resposta = await fetch('https://liturgia.up.railway.app/');
-        if (!resposta.ok) throw new Error('Falha na resposta do servidor litúrgico.');
+        console.log("[SISTEMA] 📡 Solicitando dados ao servidor litúrgico...");
+        
+        // Timeout de 10 segundos para a API não travar o bot
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const resposta = await fetch(CONFIG.API_URL, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!resposta.ok) throw new Error(`Servidor retornou erro: ${resposta.status}`);
         const dados = await resposta.json();
 
-        const tema = obterTemaLiturgico(dados.liturgia);
-        const limitar = (txt, max = 950) => txt && txt.length > max ? txt.substring(0, max) + "...\n\n*[Continue lendo no site]*" : txt;
+        const tema = Design.obterTema(dados.liturgia);
 
-        // Construção do Embed Principal
+        // 4.3. Construção do Embed Principal (A Joia da Coroa)
         const embed = new EmbedBuilder()
             .setColor(tema.cor)
-            .setAuthor({ name: 'liturgia.br', iconURL: LOGO_URL, url: SITE_URL })
-            .setTitle(`${tema.emoji} Liturgia Diária • ${dados.data}`)
-            .setDescription(`**${dados.liturgia}**\n*Reserve um momento de silêncio para a Palavra.*`)
-            // Você pode adicionar uma imagem de banner aqui se quiser:
-            // .setImage('URL_DE_UM_BANNER_BOM_DIA.png') 
+            .setAuthor({ name: 'liturgia.br', iconURL: CONFIG.LOGO_URL, url: CONFIG.SITE_URL })
+            .setTitle(`${tema.emoji} Liturgia Diária • ${dados.data || 'Hoje'}`)
+            .setDescription(`**${dados.liturgia || 'Tempo Comum'}**\n*Reserve um momento de silêncio para a Palavra.*`)
             .addFields(
                 { 
-                    name: `\n📕 Primeira Leitura`, 
-                    value: `**${dados.primeiraLeitura.referencia}**\n> ${limitar(dados.primeiraLeitura.texto).replace(/\n/g, '\n> ')}` 
+                    name: `\n📕 Primeira Leitura (${dados.primeiraLeitura?.referencia || '-'})`, 
+                    value: Design.formatarLeitura(dados.primeiraLeitura?.texto) 
                 },
                 { 
-                    name: `\n🎵 Salmo Responsorial`, 
-                    value: `**${dados.salmo.referencia}**\n**R. ${dados.salmo.refrao}**\n> ${limitar(dados.salmo.texto, 400).replace(/\n/g, '\n> ')}` 
+                    name: `\n🎵 Salmo Responsorial (${dados.salmo?.referencia || '-'})`, 
+                    value: `**R. ${dados.salmo?.refrao || '...'}**\n${Design.formatarLeitura(dados.salmo?.texto, 400)}` 
                 }
             );
 
-        // Renderiza a Segunda Leitura dinamicamente
-        if (dados.segundaLeitura && dados.segundaLeitura.texto) {
+        // Verifica de forma segura se existe a Segunda Leitura hoje
+        if (dados.segundaLeitura && dados.segundaLeitura.texto && dados.segundaLeitura.texto.trim() !== "") {
             embed.addFields({ 
-                name: `\n📗 Segunda Leitura`, 
-                value: `**${dados.segundaLeitura.referencia}**\n> ${limitar(dados.segundaLeitura.texto).replace(/\n/g, '\n> ')}` 
+                name: `\n📗 Segunda Leitura (${dados.segundaLeitura.referencia})`, 
+                value: Design.formatarLeitura(dados.segundaLeitura.texto) 
             });
         }
 
-        // Evangelho em destaque
         embed.addFields({ 
-            name: `\n✝️ Evangelho`, 
-            value: `**${dados.evangelho.referencia}**\n> ${limitar(dados.evangelho.texto).replace(/\n/g, '\n> ')}` 
+            name: `\n✝️ Evangelho (${dados.evangelho?.referencia || '-'})`, 
+            value: Design.formatarLeitura(dados.evangelho?.texto) 
         })
-        .setFooter({ text: 'Design e Automação por verton.lab', iconURL: LOGO_URL })
+        .setFooter({ text: 'Design e Automação por verton.lab', iconURL: CONFIG.LOGO_URL })
         .setTimestamp();
 
-        // Construção dos Botões (Action Row)
+        // 4.4. Botões de Chamada para Ação (CTA)
         const botoes = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
-                    .setLabel('Ler Completo no Site')
-                    .setURL(SITE_URL)
+                    .setLabel('Ler Completo / Instagram')
+                    .setURL(CONFIG.SITE_URL)
                     .setStyle(ButtonStyle.Link)
                     .setEmoji('🌐'),
                 new ButtonBuilder()
                     .setLabel('Apoiar o Projeto')
-                    .setURL('https://sua-chave-pix-ou-apoia-se.com') // Coloque seu link de apoio
+                    .setURL('https://sua-chave-pix-aqui.com') 
                     .setStyle(ButtonStyle.Link)
                     .setEmoji('☕')
             );
 
-        return { embeds: [embed], components: [botoes] };
+        const payloadFinal = { embeds: [embed], components: [botoes] };
+        
+        // 4.5. Salva no cache para os próximos comandos serem instantâneos
+        CacheSistema.salvar(payloadFinal);
+
+        return payloadFinal;
 
     } catch (erro) {
-        console.error("Erro no motor:", erro);
-        // Retorna um Embed de erro elegante ao invés de texto puro
+        console.error("[ERRO CRÍTICO] Falha na obtenção da Liturgia:", erro.message);
+        
         const erroEmbed = new EmbedBuilder()
             .setColor('#dc2626')
-            .setTitle('⚠️ Indisponibilidade Temporária')
-            .setDescription('Não foi possível conectar ao lecionário no momento. Tente novamente em alguns minutos.');
-        return { embeds: [erroEmbed] };
+            .setAuthor({ name: 'liturgia.br', iconURL: CONFIG.LOGO_URL })
+            .setTitle('⚠️ Sinal Instável')
+            .setDescription('**O lecionário digital está indisponível no momento.**\nNossos servidores estão sobrecarregados ou a API de liturgia está em manutenção. Por favor, tente novamente em alguns instantes.')
+            .setFooter({ text: 'Monitoramento automático de falhas - verton.lab' });
+            
+        return { embeds: [erroEmbed], ephemeral: true };
     }
 }
 
-// --- 4. INICIALIZAÇÃO E CRON ---
-client.once('ready', async () => {
-    console.log(`✅ Sistema Operacional: ${client.user.tag} online.`);
-
-    // Registra os Slash Commands
-    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-    try {
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('🚀 Interface de Slash Commands atualizada.');
-    } catch (error) {
-        console.error('Falha ao registrar comandos:', error);
-    }
-
-    // Rotina Matinal Automática (07:00 da manhã)
-    cron.schedule('0 7 * * *', async () => {
-        const payload = await construirInterfaceLiturgia();
-        
-        client.guilds.cache.forEach(guild => {
-            const canal = guild.channels.cache.find(c => c.name === 'liturgia' || c.name === 'geral');
-            if (canal && canal.isTextBased()) {
-                canal.send({ content: "## ☀️ Bom dia, comunidade!\n*A liturgia de hoje já está disponível para leitura.*", ...payload });
-            }
-        });
-    }, { timezone: "America/Sao_Paulo" });
+// --- 5. INICIALIZAÇÃO DO CLIENTE DISCORD ---
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// --- 5. INTERAÇÃO COM USUÁRIO ---
+client.once('ready', async () => {
+    console.log(`\n================================`);
+    console.log(`✅ ${client.user.tag} ONLINE E OPERANTE`);
+    console.log(`================================\n`);
+
+    // Define o status customizado do bot (O que ele está jogando/assistindo)
+    client.user.setActivity('/liturgia', { type: ActivityType.Listening });
+
+    // Registra os Slash Commands globalmente
+    const comandosParaRegistrar = [
+        new SlashCommandBuilder()
+            .setName('liturgia')
+            .setDescription('Acesse a liturgia diária completa com formatação premium liturgia.br')
+    ].map(command => command.toJSON());
+
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    try {
+        await rest.put(Routes.applicationCommands(client.user.id), { body: comandosParaRegistrar });
+        console.log('[SISTEMA] 🚀 Slash Commands sincronizados com o Discord.');
+    } catch (error) {
+        console.error('[ERRO] Falha ao registrar comandos:', error);
+    }
+
+    // --- 6. AUTO-BROADCAST (Rádio Matinal) ---
+    cron.schedule(CONFIG.HORARIO_BOM_DIA, async () => {
+        console.log("[CRON] 🌅 Iniciando transmissão matinal de liturgia...");
+        
+        const payload = await obterPayloadLiturgia();
+        if (payload.ephemeral) return; // Se a API estiver fora, não manda mensagem de erro pra todos os canais
+
+        let enviosComSucesso = 0;
+
+        // Varre todos os servidores em que o bot está instalado
+        client.guilds.cache.forEach(async guild => {
+            try {
+                // Procura um canal que tenha 'liturgia' ou 'geral' no nome
+                const canal = guild.channels.cache.find(c => 
+                    (c.name.includes('liturgia') || c.name.includes('geral')) && c.isTextBased()
+                );
+
+                if (canal) {
+                    await canal.send({ 
+                        content: "## ☀️ Bom dia, comunidade!\n*A liturgia de hoje já está disponível para meditação.*", 
+                        ...payload 
+                    });
+                    enviosComSucesso++;
+                }
+            } catch (err) {
+                console.log(`[CRON AVISO] Sem permissão para enviar no servidor: ${guild.name}`);
+            }
+        });
+
+        console.log(`[CRON] 📡 Transmissão concluída. Enviado para ${enviosComSucesso} canais.`);
+    }, { timezone: CONFIG.TIMEZONE });
+});
+
+// --- 7. ESCUTADOR DE INTERAÇÕES (Comandos do Usuário) ---
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'liturgia') {
-        // Mostra o status "Pensando..." no Discord
+        // O bot avisa o Discord que está pensando (Evita erro de timeout)
         await interaction.deferReply(); 
 
-        // Puxa a UI construída e envia
-        const payload = await construirInterfaceLiturgia();
-        await interaction.editReply(payload);
+        // Processa os dados (rápido pelo cache, ou aguarda a API)
+        const payloadFinal = await obterPayloadLiturgia();
+        
+        // Envia a resposta final
+        await interaction.editReply(payloadFinal);
     }
 });
 
+// --- 8. ATIVAÇÃO DO MOTOR ---
+if (!process.env.TOKEN) {
+    console.error("❌ ERRO FATAL: TOKEN não encontrado. Verifique suas variáveis no Railway.");
+    process.exit(1);
+}
 client.login(process.env.TOKEN);
